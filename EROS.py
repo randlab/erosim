@@ -631,9 +631,11 @@ def sim_cond_2D(N, covmodels, means_surf, dimension, spacing, origin, w_logs, nr
                     for k,v in well_in_lines.items():
                         if k != bh_id:  # check only other boreholes
                             for idx_k in range(-1, prog_logs[k], -1):  # check only already constrained intervals
-                                lin = v[0][idx_k]
-                                if p.intersects(lin):
-                                    if v[1] != fa_id_to_const:
+                                lin = v[idx_k][0]
+                                # print(p, lin)
+                                # if p.intersects(lin):
+                                if p.intersection(lin).length > 0.05:  # TO FIX
+                                    if v[idx_k][1] != fa_id_to_const:
                                         if plot:
                                             plot_things()
 
@@ -642,7 +644,6 @@ def sim_cond_2D(N, covmodels, means_surf, dimension, spacing, origin, w_logs, nr
                                     
         if plot:
             plot_things()
-
 
         return "correct"
     
@@ -688,7 +689,7 @@ def sim_cond_2D(N, covmodels, means_surf, dimension, spacing, origin, w_logs, nr
     # correct position of the boreholes
     new_w_logs = []
     for w in w_logs:
-        w =( plot_xg[np.round((w[0] - ox - sx/2)/sx).astype(int)], w[1], w[2]) # set x to the nearest center cell
+        w =( xgc[np.round((w[0] - ox - sx/2)/sx).astype(int)], w[1], w[2]) # set x to the nearest center cell
         new_w_logs.append(w)
     w_logs = new_w_logs
 
@@ -810,8 +811,8 @@ def sim_cond_2D(N, covmodels, means_surf, dimension, spacing, origin, w_logs, nr
         sigma = np.sqrt(cm.sill())
 
         # print(i)
-        # if i == 96:
-        #    return real_surf, prog_logs, dic_c
+        # if i == 91:
+        #    return real_surf, prog_logs, dic_c, well_in_lines, w_logs
 
         check_dic_c(dic_c, prog_logs) 
 
@@ -938,7 +939,7 @@ def sim_cond_2D(N, covmodels, means_surf, dimension, spacing, origin, w_logs, nr
 
                     erod_layer = True
 
-                    # now that we have fix the problem we must simulate correctly the next surface, adapt dic_c
+                    # now that we have fixed the problem we must simulate correctly the next surface, adapt dic_c
                     dic_c[i].remove(iwell)
                     if not dic_c[i]:  # empty
                         del(dic_c[i])
@@ -975,8 +976,19 @@ def sim_cond_2D(N, covmodels, means_surf, dimension, spacing, origin, w_logs, nr
                     ineq_x = temp[:, 0]
                     ineq_v = temp[:, 1]
 
-            # if i == 95:
-            #     print(ineq_x,ineq_v, ineq_max_x, ineq_max_v)
+            if len(x_hd) == 0:
+                x_hd = None
+                z_hd = None
+            if len(ineq_x) == 0:
+                ineq_x = None
+                ineq_v = None
+            if len(ineq_max_x) == 0:
+                ineq_max_x = None
+                ineq_max_v = None
+
+            # if i == 41:
+            #     print(x_hd, z_hd, ineq_x, ineq_v, ineq_max_x, ineq_max_v)
+
             s1 = geone.geosclassicinterface.simulate1D(cm, nx, sx, ox, nreal=1, mean=means[i], verbose=verbose, 
                                                        searchRadiusRelative=1, nneighborMax=12,
                                                        x=x_hd, v=z_hd,
@@ -1019,7 +1031,7 @@ def sim_cond_2D(N, covmodels, means_surf, dimension, spacing, origin, w_logs, nr
                                 ineq_max_v.append(res)
                             
             elif i > 0 and np.random.random() > 0:  # onlap 
-
+                
                 s_bef = s1.copy()
                 h_sim = [s_bef[ibh] for ibh in bh_idxs]  # height of simulation at bh positions
 
@@ -1036,8 +1048,11 @@ def sim_cond_2D(N, covmodels, means_surf, dimension, spacing, origin, w_logs, nr
 
                             if pr == -1:
                                 l_int.append((el[0], el[1], bh[2][0][1]-bh[1]))
+                            elif pr == -len(bh[2]):
+                                l_int.append((el[0], 9999, h_sim[bh_id]))  # top of the borehole --> virtually infinite at the top to prevent inconsistency
                             else:
-                                l_int.append((el[0], el[1], bh[2][pr+1][1]))
+                                # l_int.append((el[0], el[1], bh[2][pr+1][1]))
+                                l_int.append((el[0], el[1], bh[2][pr+1][1]))  #(facies, top of facies, bottom of facies)
                         else:
                             l_int.append((None, h_sim[bh_id]))
 
@@ -1068,6 +1083,9 @@ def sim_cond_2D(N, covmodels, means_surf, dimension, spacing, origin, w_logs, nr
 
                     facies = l_int[choice][0]
 
+                    if i==90:
+                        print(i, choice, facies, l_int, pro, means[i], cm.sill())
+
                     # create ineq
                     for iw in range(nwells):
                         ibh = bh_idxs[iw]
@@ -1089,16 +1107,29 @@ def sim_cond_2D(N, covmodels, means_surf, dimension, spacing, origin, w_logs, nr
                             if xgc[ibh] not in ineq_x:
                                 ineq_x.append(xgc[ibh])
                                 ineq_v.append(t[2])
+                
+
             #if i == 26:
-            #    print(x_hd, z_hd, ineq_x, ineq_v, ineq_max_x, ineq_max_v)
-            s1 = geone.geosclassicinterface.simulate1D(cm, nx, sx, ox, nreal=1, mean=means[i], verbose=0, 
+            # empty list become none
+            if len(x_hd) == 0:
+                x_hd = None
+                z_hd = None
+            if len(ineq_x) == 0:
+                ineq_x = None
+                ineq_v = None
+            if len(ineq_max_x) == 0:
+                ineq_max_x = None
+                ineq_max_v = None
+            
+            # print(i, x_hd, z_hd, ineq_x, ineq_v, ineq_max_x, ineq_max_v)
+            s1 = geone.geosclassicinterface.simulate1D(cm, nx, sx, ox, nreal=1, mean=means[i], verbose=verbose, 
                                                        searchRadiusRelative=1, nneighborMax=12, x=x_hd, v=z_hd,
                                                        xIneqMin=ineq_x, vIneqMin=ineq_v,
                                                        xIneqMax=ineq_max_x, vIneqMax=ineq_max_v)["image"].val[0, 0, 0, :]
 
             # limit surface between top and bot
-            s1[s1 > top] = top[s1 > top]
-            s1[s1 < bot] = bot[s1 < bot]
+            # s1[s1 > top] = top[s1 > top]
+            # s1[s1 < bot] = bot[s1 < bot]
 
         # loop over prexisting surfaces and apply erosion rules
         for o in range(i):
@@ -1226,7 +1257,6 @@ def sim_cond_2D(N, covmodels, means_surf, dimension, spacing, origin, w_logs, nr
                         g.add_edge(res[0], res[1], res[2])
         return g
 
-
     ## simulation of the facies
     facies_ids = np.array(facies_ids)
     proba_cdf = np.array(proba_cdf)
@@ -1252,8 +1282,8 @@ def sim_cond_2D(N, covmodels, means_surf, dimension, spacing, origin, w_logs, nr
     
     # set a hard data 
     for p_id, p in zip(list_ids, list_p):
-        b=[]
-        b_id = []
+        b=[]  # list to store facies occurences in the polygon
+        b_id = []  # list to store facies id
         for v in well_in_lines.values():
             for line in v:
                 if p.intersects(line[0]):
@@ -1264,7 +1294,7 @@ def sim_cond_2D(N, covmodels, means_surf, dimension, spacing, origin, w_logs, nr
             if len(b) > 1:  # if a polygon cross cut more than one borehole with different facies (can happen)
                 # fa_ids = np.array([i.id for i in b])
                 fa_ids = np.array([b_id])
-                if not (fa_ids == fa_ids[0]).all():
+                if not (fa_ids == fa_ids[0][0]).all():
                     lengths = np.array([i.intersection(p).length for i in b])
                     idx = np.where(lengths == lengths.max())[0][0]   
                     line = b[idx]  # select line
@@ -1275,6 +1305,7 @@ def sim_cond_2D(N, covmodels, means_surf, dimension, spacing, origin, w_logs, nr
 
             elif len(b) == 1:
                 line = b[0]
+                id_line = b_id[0]
 
             # dic_res[p.ID] = line.id
             dic_res[p_id] = id_line
@@ -1297,7 +1328,6 @@ def sim_cond_2D(N, covmodels, means_surf, dimension, spacing, origin, w_logs, nr
                 new_p = 0
 
             proba[i] = new_p
-
 
         proba = proba / proba.sum()
         id_sim = np.random.choice(ids_to_sim)  # select a volume to simulate
