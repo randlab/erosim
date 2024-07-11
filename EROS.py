@@ -467,6 +467,8 @@ def sim_cond_2D(N, covmodels, means_surf, dimension, spacing, origin, w_logs, nr
             means = np.concatenate((means, np.array(means[-1]).reshape(-1)))
         elif len(means.shape) == 2:
             means = np.concatenate((means, np.array(means[-1]).reshape(-1, nx)))
+        else:
+            raise ValueError ("Invalid shape {} for means_surf argument".format(means_surf.shape))
 
         erod_lst = np.concatenate((erod_lst, np.array((np.random.random() < xi)).reshape(-1)))
         real_surf = np.concatenate((real_surf, np.ones(nx).reshape(-1, nx)))
@@ -566,7 +568,7 @@ def sim_cond_2D(N, covmodels, means_surf, dimension, spacing, origin, w_logs, nr
         while np.abs(real_surf[i2_min, idx_bh_x] - height_interface) > 0.1 and real_surf[i2_min, idx_bh_x] > height_interface:  
             i2_min -= 1
 
-            if i2_min == 0:
+            if i2_min <= 0:
                 break
         
         for i2 in range(i2_min, i2_max):  # loop from lowest surfaces to highest
@@ -674,7 +676,7 @@ def sim_cond_2D(N, covmodels, means_surf, dimension, spacing, origin, w_logs, nr
     one_cm = False
     if isinstance(covmodels, gcm.CovModel1D):
         one_cm = True
-
+    
     elif isinstance(covmodels, list):
         for cm in covmodels:
             assert isinstance(cm, gcm.CovModel1D), "object in covmodels must be geone CovModel1D objects"
@@ -682,7 +684,17 @@ def sim_cond_2D(N, covmodels, means_surf, dimension, spacing, origin, w_logs, nr
     # adjust surfaces
     global erod_lst, real_surf, means # global variables
     
+    # means
     means = means_surf.copy()
+    
+    mean_array = 0
+    if len(means.shape) == 1 and means.shape[0] == N:
+        mean_array = 1
+    elif len(means.shape) > 1 and means.shape == (N, nx):
+        mean_array = 2  # sequence of 1D arrays
+    else:
+        raise ValueError ("Invalid shape {} for means_surf argument".format(means_surf.shape))
+
     erod_lst = np.random.uniform(size=N_surf) < xi  # determine which layers will be erode
     real_surf = np.ones([N_surf, nx])
 
@@ -733,25 +745,33 @@ def sim_cond_2D(N, covmodels, means_surf, dimension, spacing, origin, w_logs, nr
     # boreholes indexes
     bh_idxs = [np.round(((bh[0] - ox - sx/2)/sx)).astype(int) for bh in w_logs]
 
-    # choose when to respect HD
+    # choose when to respect HD  --> TO FINISH non-stationarity with multiple cm
     # dictionary of constrained from boreholes
     dic_c = {}
     for o in range(nwells):
         l = [i[1] for i in w_logs[o][-1]]  # interfaces in borehole
+        ix = bh_idxs[o]
 
         for i in l:
             if one_cm:
-                dis = scipy.stats.norm(i, np.sqrt(covmodels.sill()))
-                probas = dis.pdf(means)
+                for i in l:
+                    if mean_array == 1:
+                        dis = scipy.stats.norm(i, np.sqrt(covmodels.sill()))
+                        probas = dis.pdf(means)
+                    elif mean_array == 2:  # non stationarity in mean
+                        dis = scipy.stats.norm(i, np.sqrt(covmodels.sill()))
+                        probas = dis.pdf([m[ix] for m in means])
+                    p = np.random.choice(range(N_surf), p=probas/probas.sum())
+                    # dis = scipy.stats.norm(i, np.sqrt(covmodels.sill()))
+                    # probas = dis.pdf(means)
 
-            else:
+            else:  # TO FINISH
                 probas = np.ones(N_surf, dtype=np.float32)
                 for isurf in range(N_surf):
                     cm = covmodels[isurf]
                     dis = scipy.stats.norm(i, np.sqrt(cm.sill()))
                     probas[isurf] = dis.pdf(means[isurf])
-
-            p = np.random.choice(range(N_surf), p=probas/probas.sum())
+                    p = np.random.choice(range(N_surf), p=probas/probas.sum())
 
             if p not in dic_c.keys():
                 dic_c[p] = []
@@ -1038,6 +1058,7 @@ def sim_cond_2D(N, covmodels, means_surf, dimension, spacing, origin, w_logs, nr
                 ## select a bh where to simulate the surface
                 l_int = []
                 pro = []
+                bh_idx = []
                 for bh_id in range(nwells):
                     bh = w_logs[bh_id]
                     pr = prog_logs[bh_id]
@@ -1059,12 +1080,19 @@ def sim_cond_2D(N, covmodels, means_surf, dimension, spacing, origin, w_logs, nr
                     else:  # bh completed or too many surfaces simulated
                         l_int.append(None)
 
-                for t in l_int:
+                    bh_idx.append(bh_idxs[bh_id])
+
+                for o, t in enumerate(l_int):
+
+                    if mean_array == 1:
+                        mi = means[i]
+                    elif mean_array == 2:
+                        mi = means[i][bh_idx[o]]                   
+
                     if t is not None:
                         if t[0] is not None:
-                            if means[i] + sigma > t[2] and means[i] - sigma < t[1]:
-
-                                v = scipy.stats.norm(means[i], cm.sill()).cdf((t[2], t[1]))
+                            if mi + sigma > t[2] and mi - sigma < t[1]:
+                                v = scipy.stats.norm(mi, cm.sill()).cdf((t[2], t[1]))
                                 proba = v[1] - v[0]
                                 #proba = scipy.stats.norm(means[i], cm.sill()).pdf((np.linspace(t[2], t[1], 10))).sum()
                                 pro.append(proba)
@@ -1083,8 +1111,8 @@ def sim_cond_2D(N, covmodels, means_surf, dimension, spacing, origin, w_logs, nr
 
                     facies = l_int[choice][0]
 
-                    if i==90:
-                        print(i, choice, facies, l_int, pro, means[i], cm.sill())
+                    # if i==90:
+                    #     print(i, choice, facies, l_int, pro, means[i], cm.sill())
 
                     # create ineq
                     for iw in range(nwells):
@@ -1158,6 +1186,9 @@ def sim_cond_2D(N, covmodels, means_surf, dimension, spacing, origin, w_logs, nr
 
     real_surf[real_surf>z1]=z1
     real_surf[real_surf<oz]=oz
+    for surf in real_surf:
+        surf[surf > top] = top[surf > top]
+        surf[surf < bot] = bot[surf < bot]
     # real_surf[real_surf>top]=top[real_surf>top]
     # real_surf[real_surf<bot]=bot[real_surf<bot]
 
@@ -1243,6 +1274,8 @@ def sim_cond_2D(N, covmodels, means_surf, dimension, spacing, origin, w_logs, nr
     #                 res = (p.ID, i.ID, p.intersection(i).length)
     #                 if res[2] > 0:
     #                     g.add_edge(res[0], res[1], res[2])
+
+    # return real_surf, list_p, list_ids, well_in_lines, w_logs
 
     def create_graph():
         # if necessary create graph
